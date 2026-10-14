@@ -119,5 +119,36 @@ def analyse(data, predictors, target):
                               for i in range(1, exog.shape[1]))
     return ols, summary
 
+PREDICTOR_LABELS = {
+    "fifa_rank_difference": "FIFA rank difference (positive favors home/team)",
+    "fifa_points_difference": "FIFA points difference (home minus away)",
+    "rest_days_difference": "Rest days difference (home minus away)",
+    "tournament_day": "Tournament day",
+    "knockout_stage": "Knockout-stage match",
+    "home_is_host_nation": "Home team is a host nation",
+    "away_is_host_nation": "Away team is a host nation",
+    "team_fifa_points": "Team FIFA points",
+    "team_rest_days": "Team rest days",
+    "opponent_rest_days": "Opponent rest days",
+    "team_is_host_nation": "Team is a host nation",
+    "opponent_is_host_nation": "Opponent is a host nation",
+    "match_number": "Official match number",
+}
 
+
+def save_coefficient_table(model, predictors, path):
+    confidence = model.conf_int().loc[predictors]
+    p_values = model.pvalues.loc[predictors]
+    table = pd.DataFrame({
+        "variable": predictors,
+        "predictor": [PREDICTOR_LABELS[name] for name in predictors],
+        "coefficient": model.params.loc[predictors].values,
+        "standard_error": model.bse.loc[predictors].values,
+        "95% CI lower": confidence[0].values,
+        "95% CI upper": confidence[1].values,
+        "p_value": p_values.values,
+        "significance": ["p < .001" if p < 0.001 else "p < .05" if p < 0.05 else "not significant"
+                         for p in p_values],
+    })
+    table.to_csv(path, index=False)
 
