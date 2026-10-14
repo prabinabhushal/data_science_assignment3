@@ -152,3 +152,103 @@ def save_coefficient_table(model, predictors, path):
     })
     table.to_csv(path, index=False)
 
+# ------------------------------------
+def save_predictions(data, model, target, path):
+    predictions = data[["match_id", "tournament_day", "match_number"]].copy()
+    for column in ("team_a", "team_b", "team", "opponent"):
+        if column in data:
+            predictions[column] = data[column]
+    predictions["actual"] = data[target].to_numpy()
+    predictions["predicted"] = model.fittedvalues.to_numpy()
+    predictions["residual"] = predictions["actual"] - predictions["predicted"]
+    predictions.to_csv(path, index=False)
+    return predictions
+
+
+def save_diagnostic_figures(predictions, target_label, model_label, prefix):
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(predictions["actual"], predictions["predicted"], alpha=0.72,
+               color="#167D72", edgecolor="white", linewidth=0.5)
+    bounds = [min(predictions["actual"].min(), predictions["predicted"].min()),
+              max(predictions["actual"].max(), predictions["predicted"].max())]
+    ax.plot(bounds, bounds, color="#D05B46", linestyle="--", linewidth=1.5,
+            label="Perfect predictions")
+    ax.set(title=f"{model_label}: in-sample actual vs predicted",
+           xlabel=f"Actual {target_label}", ylabel=f"Predicted {target_label}")
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(FIG / f"{prefix}_actual_vs_predicted.png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(predictions["predicted"], predictions["residual"], alpha=0.72,
+               color="#167D72", edgecolor="white", linewidth=0.5)
+    ax.axhline(0, color="#D05B46", linestyle="--", linewidth=1.5)
+    ax.set(title=f"{model_label}: in-sample residuals vs predicted",
+           xlabel=f"Predicted {target_label}", ylabel="Residual (actual minus predicted)")
+    fig.tight_layout()
+    fig.savefig(FIG / f"{prefix}_residuals.png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
+# ------------------------------------
+
+ols21, s21 = analyse(lr21, P21, "goal_difference")
+ols22, s22 = analyse(lr22, P22, "goals_scored")
+
+# Required validation assertions.
+assert len(lr21) == 104
+assert len(P21) == 8
+assert len(lr22) == 208
+assert len(P22) == 8
+assert lr21.match_id.nunique() == 104
+assert lr22.match_id.nunique() == 104
+assert lr22.groupby("match_id").size().eq(2).all()
+assert lr21.isna().sum().sum() == 0
+assert lr22.isna().sum().sum() == 0
+assert matches.home_name.isna().sum() == 0 and matches.away_name.isna().sum() == 0
+
+lr21.to_csv(PROC / "lr21_dataset_rebuilt.csv", index=False)
+lr22.to_csv(PROC / "lr22_dataset_rebuilt.csv", index=False)
+
+save_coefficient_table(ols21, P21, TAB / "lr21_coefficients_rebuilt.csv")
+save_coefficient_table(ols22, P22, TAB / "lr22_coefficients_rebuilt.csv")
+
+summary_rows = []
+for label, target, predictors, summary in [
+    ("LR 2.1: Match goal difference", "Home goals minus away goals", P21, s21),
+    ("LR 2.2: Team goals scored", "Goals scored by a team", P22, s22),
+]:
+    summary_rows.append({
+        "Model": label,
+        "Target": target,
+        "Observations": summary["n"],
+        "Predictors": len(predictors),
+        "Full-data R-squared": summary["r2"],
+        "Adjusted R-squared": summary["adjusted_r2"],
+        "Grouped CV R-squared": summary["cv_r2"],
+        "Grouped CV MAE (goals)": summary["cv_mae"],
+        "Grouped CV RMSE (goals)": summary["cv_rmse"],
+        "Chronological holdout matches": summary["holdout_matches"],
+        "Chronological holdout R-squared": summary["holdout_r2"],
+        "Chronological holdout MAE (goals)": summary["holdout_mae"],
+        "Chronological holdout RMSE (goals)": summary["holdout_rmse"],
+        "Breusch-Pagan p-value": summary["breusch_pagan_p"],
+        "Shapiro-Wilk p-value": summary["shapiro_p"],
+        "Maximum VIF": summary["max_vif"],
+    })
+pd.DataFrame(summary_rows).to_csv(TAB / "model_summary_rebuilt.csv", index=False)
+
+predictions21 = save_predictions(lr21, ols21, "goal_difference",
+                                 TAB / "lr21_predictions_rebuilt.csv")
+predictions22 = save_predictions(lr22, ols22, "goals_scored",
+                                 TAB / "lr22_predictions_rebuilt.csv")
+save_diagnostic_figures(predictions21, "goal difference", "LR 2.1", "lr21")
+save_diagnostic_figures(predictions22, "goals scored", "LR 2.2", "lr22")
+
+print("LR 2.1 (match goal difference)")
+print(f"  Grouped CV R-squared: {s21['cv_r2']:.3f}; MAE: {s21['cv_mae']:.3f}; RMSE: {s21['cv_rmse']:.3f}")
+print(f"  Chronological holdout R-squared: {s21['holdout_r2']:.3f}; MAE: {s21['holdout_mae']:.3f}; RMSE: {s21['holdout_rmse']:.3f}")
+print("LR 2.2 (team goals scored)")
+print(f"  Grouped CV R-squared: {s22['cv_r2']:.3f}; MAE: {s22['cv_mae']:.3f}; RMSE: {s22['cv_rmse']:.3f}")
+print(f"  Chronological holdout R-squared: {s22['holdout_r2']:.3f}; MAE: {s22['holdout_mae']:.3f}; RMSE: {s22['holdout_rmse']:.3f}")
+print("Validation passed. Rebuilt datasets, model tables, prediction tables and diagnostic figures.")
